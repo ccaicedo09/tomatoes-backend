@@ -6,3 +6,4 @@ ultralytics
 Pillow
 joblib
 opencv-python
+scikit-learn

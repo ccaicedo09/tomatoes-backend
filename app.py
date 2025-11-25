@@ -14,13 +14,15 @@ app = Flask(__name__)
 # CORS configuration
 CORS(app, resources={r"/api/*": {"origins": ["http://localhost:5173", "https://tomatoes-frontend.vercel.app"]}})
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # --- 1. CONFIGURACIÓN Y CARGA DE MODELOS ---
 print("🍅 Cargando sistema de IA final... Por favor espera.")
 
 # A. Cargar Segmentador (YOLO)
 try:
-    segmentador = YOLO('best.pt') 
+    yolo_path = os.path.join(BASE_DIR, "best.pt")
+    segmentador = YOLO(yolo_path) 
     print("✅ Segmentador YOLO cargado.")
 except Exception as e:
     print(f"❌ Error cargando YOLO: {e}")
@@ -29,26 +31,31 @@ except Exception as e:
 # B. Cargar Modelos de Clasificación
 modelos = {}
 try:
-    modelos['cnn'] = tf.keras.models.load_model('modelo_1_cnn.h5', compile=False)
+    cnn_path = os.path.join(BASE_DIR, "modelo_1_cnn.h5")
+    modelos['cnn'] = tf.keras.models.load_model(cnn_path, compile=False)
 except:
     print("⚠️ Aviso: No se encontró 'modelo_1_cnn.h5'.")
 
 try:
-    modelos['mobilenet'] = tf.keras.models.load_model('modelo_2_mobilenet_final.keras') 
+    mobilenet_final_path = os.path.join(BASE_DIR, "modelo_2_mobilenet_final.keras")
+    modelos['mobilenet'] = tf.keras.models.load_model(mobilenet_final_path)
     print("✅ Modelo MobileNet final cargado.")
-except:
-    print("⚠️ Aviso: No se encontró 'modelo_2_mobilenet_final.keras'.")
+except Exception as e:
+    print(f"⚠️ Error con 'modelo_2_mobilenet_final.keras': {e}")
     try:
-        modelos['mobilenet'] = tf.keras.models.load_model('modelo_2_mobilenet.keras')
+        mobilenet_old_path = os.path.join(BASE_DIR, "modelo_2_mobilenet.keras")
+        modelos['mobilenet'] = tf.keras.models.load_model(mobilenet_old_path)
         print("✅ Modelo MobileNet (versión anterior) cargado.")
-    except:
-        print("❌ No se pudo cargar ningún modelo MobileNet.")
+    except Exception as e2:
+        print(f"❌ No se pudo cargar ningún modelo MobileNet: {e2}")
 
 try:
-    modelos['svm'] = joblib.load('modelo_3_svm.pkl')
+    svm_path = os.path.join(BASE_DIR, "modelo_3_svm.pkl")
+    print("Comprobando existencia SVM:", os.path.exists(svm_path), "->", svm_path)
+    modelos['svm'] = joblib.load(svm_path)
     print("✅ Modelo SVM cargado.")
-except:
-    print("⚠️ Aviso: No se encontró 'modelo_3_svm.pkl'.")
+except Exception as e:
+    print(f"❌ Error cargando modelo SVM: {e}")
 
 # Lista de clases (debe coincidir con el orden de entrenamiento)
 CLASES = ['dañado', 'maduro', 'verde', 'viejo']
