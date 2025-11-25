@@ -12,7 +12,7 @@ from flask_cors import CORS
 app = Flask(__name__)
 
 # CORS configuration
-CORS(app, resources={r"/api/*": {"origins": "http://localhost:5173", "https://tomatoes-frontend.vercel.app/"}})
+CORS(app, resources={r"/api/*": {"origins": ["http://localhost:5173", "https://tomatoes-frontend.vercel.app/"]}})
 
 
 # --- 1. CONFIGURACIÓN Y CARGA DE MODELOS ---
