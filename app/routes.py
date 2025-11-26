@@ -11,6 +11,17 @@ api_bp = Blueprint("api", __name__, url_prefix="/api")
 def health():
     return jsonify({"status": "ok", "message": "TomatoGuard API funcionando"}), 200
 
+@api_bp.route("/db-test")
+def db_test():
+    db = current_app.config["MONGO_DB"]
+    # Insert test doc
+    result = db["tests"].insert_one({"mensaje": "Hola Mongo desde TomatoGuard"})
+    # Read it
+    doc = db["tests"].find_one({"_id": result.inserted_id})
+    doc["_id"] = str(doc["_id"])
+    
+    return jsonify({"insertado": doc}), 200
+
 # One single tomato analysis
 @api_bp.route('/analizar_uno', methods=['POST'])
 def analizar_uno():

@@ -4,6 +4,7 @@ from flask_cors import CORS
 
 from .ml_models import cargar_modelos
 from .routes import api_bp
+from .db import db
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -26,6 +27,8 @@ def create_app():
     app.config["MODELOS"] = modelos
     app.config["SEGMENTADOR"] = segmentador
     app.config["CLASES"] = clases
+    
+    app.config["MONGO_DB"] = db
     
     app.register_blueprint(api_bp)
     
