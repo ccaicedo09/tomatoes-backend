@@ -7,3 +7,5 @@ Pillow
 joblib
 opencv-python
 scikit-learn
+pymongo
+python-dotenv
