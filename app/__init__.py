@@ -21,11 +21,12 @@ def create_app():
     
     # Load models
     print("LOG: Loading final IA System... Please wait.")
-    modelos, segmentador, clases = cargar_modelos(BASE_DIR)
+    modelos, segmentador,roboflow_client, clases = cargar_modelos(BASE_DIR)
     
     # Inject refs to models in app
     app.config["MODELOS"] = modelos
     app.config["SEGMENTADOR"] = segmentador
+    app.config["ROBOFLOW_CLIENT"] = roboflow_client
     app.config["CLASES"] = clases
     
     app.config["MONGO_DB"] = db

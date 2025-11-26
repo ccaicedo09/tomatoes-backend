@@ -188,169 +188,118 @@ def segmentar_todo():
     if 'imagen' not in request.files:
         return jsonify({"error": "Falta imagen"}), 400
     
-    save_sample = request.args.get("saveSample", "false").lower() == "true"
+    # 1. Configuración de Modelos
+    rf_client = current_app.config.get("ROBOFLOW_CLIENT")
+    modelos = current_app.config.get("MODELOS")
+    clasificador = modelos.get('mobilenet') # Tu cerebro experto en calidad
+    CLASES = current_app.config.get("CLASES") # ['dañado', 'maduro', 'verde', 'viejo']
 
-    modelos = current_app.config["MODELOS"]
-    segmentador = current_app.config["SEGMENTADOR"]
-    CLASES = current_app.config["CLASES"]
+    if not rf_client or not clasificador:
+        return jsonify({"error": "Faltan modelos (Roboflow o MobileNet)"}), 500
 
-    clasificador = modelos.get('mobilenet')
-    if not segmentador or not clasificador:
-        return jsonify({"error": "Faltan modelos (YOLO o MobileNet)"}), 500
-
+    # 2. Leer Imagen
     file = request.files['imagen']
-    original_filename = file.filename or "upload.jpg"
+    file_bytes = np.frombuffer(file.read(), np.uint8)
+    img_bgr = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+    img_original_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB) # Para recortar con PIL
     
-    img_pil = Image.open(file).convert('RGB')
-    img_bgr = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
-    img_original_np = np.array(img_pil)
-    
-    height, width, channels = img_original_np.shape
+    # Guardar temporalmente para Roboflow
+    temp_filename = f"temp_{uuid.uuid4().hex}.jpg"
+    cv2.imwrite(temp_filename, img_bgr)
 
-    results = segmentador.predict(
-        img_original_np,
-        conf=0.1,
-        iou=0.7,
-        retina_masks=True,
-        verbose=False
-    )
-    result = results[0]
-    
-    num_detections = 0
-    detections_for_db = []
-
-    if result.boxes:
+    try:
+        print("🚀 Enviando a Roboflow para segmentación...")
+        result = rf_client.run_workflow(
+            workspace_name="proyecto-kbmoz",
+            workflow_id="detect-count-and-visualize-3",
+            images={"image": temp_filename}
+        )
         
-        boxes = result.boxes
-        boxes_np = boxes.xyxy.cpu().numpy().astype(int)
-        num_detections = len(boxes_np)
-        
-        for i, box in enumerate(boxes_np):
-            x1, y1, x2, y2 = box
+        # Limpieza
+        if os.path.exists(temp_filename):
+            os.remove(temp_filename)
 
-            if (x2 - x1) < 20 or (y2 - y1) < 20:
-                continue
+        predictions = result[0].get("predictions", {}).get("predictions", [])
+        print(f"✅ Roboflow detectó {len(predictions)} tomates.")
 
-            recorte = img_original_np[y1:y2, x1:x2]
-            if recorte.size == 0:
-                continue
-
-            recorte_pil = Image.fromarray(recorte).resize((224, 224))
-            input_arr = tf.keras.preprocessing.image.img_to_array(recorte_pil)
-            pred = clasificador.predict(np.array([input_arr]), verbose=0)
-            probs = pred[0]
-            idx = int(np.argmax(pred[0]))
-            clase = CLASES[idx]
-            conf = float(pred[0][idx])
+        # 3. Bucle Mágico: Recortar -> Clasificar -> Pintar
+        for pred in predictions:
+            # --- A. OBTENER COORDENADAS ---
+            x, y = int(pred["x"]), int(pred["y"])
+            w, h = int(pred["width"]), int(pred["height"])
             
-            predicted_probs = {k: float(v) for k, v in zip(CLASES, probs)}
+            # Convertir centro (x,y) a esquina superior izquierda (x1, y1)
+            x1 = max(0, int(x - w / 2))
+            y1 = max(0, int(y - h / 2))
+            x2 = min(img_bgr.shape[1], int(x + w / 2))
+            y2 = min(img_bgr.shape[0], int(y + h / 2))
 
-            colores = {
-                'dañado': (0, 0, 255),
-                'verde': (0, 255, 0),
-                'maduro': (0, 165, 255),
-                'viejo': (10, 10, 10)
-            }
-            color = colores.get(clase, (255, 255, 255))
+            # --- B. CLASIFICAR EL RECORTE (MobileNet) ---
+            # Extraer el "mini tomate" de la imagen original
+            recorte = img_original_rgb[y1:y2, x1:x2]
+            
+            label_final = "Desconocido"
+            confianza_final = 0.0
+            color = (255, 255, 255) # Blanco por defecto
 
-            if result.masks:
+            if recorte.size > 0:
                 try:
-                    if result.masks.xy[i].size > 0:
-                        contour = result.masks.xy[i].astype(np.int32).reshape(-1, 1, 2)
-                        cv2.drawContours(img_bgr, [contour], -1, color, 2)
-                except Exception:
-                    pass
+                    # Preprocesar igual que en el entrenamiento (224x224)
+                    recorte_pil = Image.fromarray(recorte).resize((224, 224))
+                    input_arr = tf.keras.preprocessing.image.img_to_array(recorte_pil)
+                    input_arr = np.array([input_arr]) # Batch de 1 imagen
 
-            cv2.rectangle(img_bgr, (x1, y1), (x2, y2), color, 2)
-            label = f"{clase[:3].upper()} {int(conf * 100)}%"
-            (w_text, h_text), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-            cv2.rectangle(img_bgr, (x1, y1 - 20), (x1 + w_text, y1), color, -1)
-            cv2.putText(img_bgr, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5, (255, 255, 255), 2)
+                    # Predicción Local
+                    preds = clasificador.predict(input_arr, verbose=0)
+                    idx = int(np.argmax(preds[0]))
+                    
+                    label_final = CLASES[idx].upper() # Ej: MADURO
+                    confianza_final = float(preds[0][idx])
+                    
+                    # Colores según calidad (BGR para OpenCV)
+                    colores = {
+                        'DAÑADO': (0, 0, 255),    # Rojo
+                        'MADURO': (0, 165, 255),  # Naranja
+                        'VERDE': (0, 255, 0),     # Verde
+                        'VIEJO': (128, 128, 128)  # Gris
+                    }
+                    color = colores.get(label_final, (255, 0, 0))
+                    
+                except Exception as e:
+                    print(f"⚠️ Error clasificando recorte: {e}")
+
+            # --- C. PINTAR RESULTADO HÍBRIDO ---
+            # 1. Polígono de Roboflow (Forma exacta)
+            if "points" in pred:
+                pts = np.array([[int(p["x"]), int(p["y"])] for p in pred["points"]], np.int32)
+                pts = pts.reshape((-1, 1, 2))
+                cv2.polylines(img_bgr, [pts], True, color, 2)
+
+            # 2. Caja y Texto de MobileNet (Ajustado para ser más pequeño)
+            texto = f"{label_final} {confianza_final*100:.0f}%"
             
-            # DB Data
-            area = int((x2 - x1) * (y2 - y1))
-            score = float(boxes.conf[i].cpu().numpy()) if boxes.conf is not None else None
+            # --- AJUSTES DE TAMAÑO ---
+            font_scale = 0.4  # Antes 0.6 (Más pequeño)
+            thickness = 1     # Antes 2 (Más fino)
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            
+            (text_w, text_h), _ = cv2.getTextSize(texto, font, font_scale, thickness)
+            
+            # Fondo ajustado al tamaño del texto
+            bg_h = text_h + 8
+            cv2.rectangle(img_bgr, (x1, y1 - bg_h), (x1 + text_w + 4, y1), color, -1)
+            
+            # Texto blanco sobre el fondo de color
+            cv2.putText(img_bgr, texto, (x1 + 2, y1 - 4), font, font_scale, (255, 255, 255), thickness)
 
-            detections_for_db.append({
-                "bbox": [int(x1), int(y1), int(x2), int(y2)],
-                "area": area,
-                "class": "tomato",
-                "score": score,                    # YOLO detection trust
-                "predictedLabel": clase,           # segmentation classification
-                "predictedConfidence": conf,
-                "predictedProbs": predicted_probs
-            })
+    except Exception as e:
+        print(f"❌ Error General: {e}")
+        return jsonify({"error": str(e)}), 500
 
-    # If there are no result.boxes or all detections were filtered,
-    # num_detections will remain 0 and detections_for_db will be empty [].
-    # We still return the image without annotations.
-
+    # 4. Retornar imagen final
     img_final_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     img_io = io.BytesIO()
-    Image.fromarray(img_final_rgb).save(img_io, 'JPEG', quality=90)
+    Image.fromarray(img_final_rgb).save(img_io, 'JPEG', quality=95)
     img_io.seek(0)
-    
-    if save_sample:
-        try:
-            # Make a dir using today's datr
-            date_str = datetime.utcnow().strftime("%Y%m%d")
-
-            # 1) Save original image
-            uploads_dir = os.path.join(current_app.root_path, "uploads", date_str)
-            os.makedirs(uploads_dir, exist_ok=True)
-
-            ext = os.path.splitext(original_filename)[1] or ".jpg"
-            original_name = f"{uuid.uuid4().hex}{ext}"
-            original_full_path = os.path.join(uploads_dir, original_name)
-            img_pil.save(original_full_path)
-
-            original_rel_path = os.path.join("uploads", date_str, original_name).replace(os.sep, "/")
-
-            # 2) Save segmented image
-            outputs_dir = os.path.join(current_app.root_path, "outputs", date_str)
-            os.makedirs(outputs_dir, exist_ok=True)
-
-            annotated_name = f"{uuid.uuid4().hex}{ext}"
-            annotated_full_path = os.path.join(outputs_dir, annotated_name)
-            Image.fromarray(img_final_rgb).save(annotated_full_path, "JPEG", quality=90)
-
-            annotated_rel_path = os.path.join("outputs", date_str, annotated_name).replace(os.sep, "/")
-
-            # 3) Document for mongo
-            doc = {
-                "filePath": original_rel_path,
-                "originalFilename": original_filename,
-                "uploadedAt": datetime.utcnow(),
-                "width": width,
-                "height": height,
-                "channels": channels,
-
-                "modelName": "mobilenet",       # clasificador usado para cada recorte
-                "modelVersion": None,
-                "predictedLabel": None,         # not need bc it's segmentation
-                "predictedConfidence": None,
-                "predictedProbs": None,
-
-                "numDetections": num_detections,
-                "detections": detections_for_db,
-                "annotatedFilePath": annotated_rel_path,
-
-                # post processing labels for dataset fixing
-                "postProcessing": {
-                "trueLabel": None,
-                "verified": False,
-                "labeledBy": None,
-                "labeledAt": None,
-                "labelSource": None,
-                "isCorrect": None,
-                "errorType": None,
-                }
-            }
-            
-            segmentation_samples.insert_one(doc)
-
-        except Exception as e:
-            current_app.logger.error(f"Error guardando sample de segmentación en DB: {e}")
 
     return send_file(img_io, mimetype='image/jpeg')
