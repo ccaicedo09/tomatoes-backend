@@ -30,6 +30,11 @@ Thumbs.db
 .env.local
 .env.*.local
 
+# Virtual environments
+venv/e
+.venv/
+env/
+
 *.pt
 *.h5
 *.keras

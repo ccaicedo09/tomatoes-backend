@@ -2,7 +2,7 @@ import os
 import tensorflow as tf
 from ultralytics import YOLO
 import joblib
-from inference_sdk import InferenceHTTPClient # <--- NUEVO IMPORT
+from inference_sdk import InferenceHTTPClient 
 
 CLASES = ['dañado', 'maduro', 'verde', 'viejo']
 
@@ -11,7 +11,6 @@ def cargar_modelos(base_dir):
     segmentador = None
     roboflow_client = None
 
-    # --- 1. Cargar YOLO Local (Plan A) ---
     try:
         yolo_path = os.path.join(base_dir, "models", "best.pt")
         if os.path.exists(yolo_path):
@@ -22,8 +21,7 @@ def cargar_modelos(base_dir):
     except Exception as e:
         print(f"❌ Error cargando YOLO Local: {e}")
 
-    # --- 2. Configurar Cliente Roboflow (Plan B - Potente) ---
-    api_key = os.getenv("ROBOFLOW_API_KEY") # Lo tomaremos del .env
+    api_key = os.getenv("ROBOFLOW_API_KEY") 
     if api_key:
         try:
             roboflow_client = InferenceHTTPClient(
@@ -36,10 +34,9 @@ def cargar_modelos(base_dir):
     else:
         print("⚠️ No hay ROBOFLOW_API_KEY en .env")
 
-    # --- 3. Cargar Modelos de Clasificación (MobileNet, etc) ---
     try:
         mobilenet_path = os.path.join(base_dir, "models", "modelo_2_mobilenet_final.keras")
-        # Si tienes la versión vieja .h5, ajusta el nombre aquí
+      
         if not os.path.exists(mobilenet_path):
              mobilenet_path = os.path.join(base_dir, "models", "modelo_2_mobilenet.keras")
         
@@ -48,7 +45,6 @@ def cargar_modelos(base_dir):
     except Exception as e:
         print(f"❌ Error cargando MobileNet: {e}")
 
-    # Cargar SVM si existe
     try:
         svm_path = os.path.join(base_dir, "models", "modelo_3_svm.pkl")
         if os.path.exists(svm_path):
@@ -57,5 +53,4 @@ def cargar_modelos(base_dir):
     except Exception:
         pass
 
-    # Retornamos todo, incluyendo el cliente de Roboflow
     return modelos, segmentador, roboflow_client, CLASES

@@ -188,22 +188,22 @@ def segmentar_todo():
     if 'imagen' not in request.files:
         return jsonify({"error": "Falta imagen"}), 400
     
-    # 1. Configuración de Modelos
+    
     rf_client = current_app.config.get("ROBOFLOW_CLIENT")
     modelos = current_app.config.get("MODELOS")
-    clasificador = modelos.get('mobilenet') # Tu cerebro experto en calidad
-    CLASES = current_app.config.get("CLASES") # ['dañado', 'maduro', 'verde', 'viejo']
+    clasificador = modelos.get('mobilenet') 
+    CLASES = current_app.config.get("CLASES") 
 
     if not rf_client or not clasificador:
         return jsonify({"error": "Faltan modelos (Roboflow o MobileNet)"}), 500
 
-    # 2. Leer Imagen
+    
     file = request.files['imagen']
     file_bytes = np.frombuffer(file.read(), np.uint8)
     img_bgr = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-    img_original_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB) # Para recortar con PIL
+    img_original_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB) 
     
-    # Guardar temporalmente para Roboflow
+    
     temp_filename = f"temp_{uuid.uuid4().hex}.jpg"
     cv2.imwrite(temp_filename, img_bgr)
 
@@ -215,88 +215,83 @@ def segmentar_todo():
             images={"image": temp_filename}
         )
         
-        # Limpieza
+        
         if os.path.exists(temp_filename):
             os.remove(temp_filename)
 
         predictions = result[0].get("predictions", {}).get("predictions", [])
         print(f"✅ Roboflow detectó {len(predictions)} tomates.")
 
-        # 3. Bucle Mágico: Recortar -> Clasificar -> Pintar
+        
         for pred in predictions:
-            # --- A. OBTENER COORDENADAS ---
+            
             x, y = int(pred["x"]), int(pred["y"])
             w, h = int(pred["width"]), int(pred["height"])
             
-            # Convertir centro (x,y) a esquina superior izquierda (x1, y1)
+            
             x1 = max(0, int(x - w / 2))
             y1 = max(0, int(y - h / 2))
             x2 = min(img_bgr.shape[1], int(x + w / 2))
             y2 = min(img_bgr.shape[0], int(y + h / 2))
 
-            # --- B. CLASIFICAR EL RECORTE (MobileNet) ---
-            # Extraer el "mini tomate" de la imagen original
+            
             recorte = img_original_rgb[y1:y2, x1:x2]
             
             label_final = "Desconocido"
             confianza_final = 0.0
-            color = (255, 255, 255) # Blanco por defecto
+            color = (255, 255, 255) 
 
             if recorte.size > 0:
                 try:
-                    # Preprocesar igual que en el entrenamiento (224x224)
+                    
                     recorte_pil = Image.fromarray(recorte).resize((224, 224))
                     input_arr = tf.keras.preprocessing.image.img_to_array(recorte_pil)
-                    input_arr = np.array([input_arr]) # Batch de 1 imagen
+                    input_arr = np.array([input_arr]) 
 
-                    # Predicción Local
+                    
                     preds = clasificador.predict(input_arr, verbose=0)
                     idx = int(np.argmax(preds[0]))
                     
-                    label_final = CLASES[idx].upper() # Ej: MADURO
+                    label_final = CLASES[idx].upper() 
                     confianza_final = float(preds[0][idx])
                     
-                    # Colores según calidad (BGR para OpenCV)
+                    
                     colores = {
-                        'DAÑADO': (0, 0, 255),    # Rojo
-                        'MADURO': (0, 165, 255),  # Naranja
-                        'VERDE': (0, 255, 0),     # Verde
-                        'VIEJO': (128, 128, 128)  # Gris
+                        'DAÑADO': (0, 0, 255),    
+                        'MADURO': (0, 165, 255),  
+                        'VERDE': (0, 255, 0),     
+                        'VIEJO': (128, 128, 128)  
                     }
                     color = colores.get(label_final, (255, 0, 0))
                     
                 except Exception as e:
                     print(f"⚠️ Error clasificando recorte: {e}")
 
-            # --- C. PINTAR RESULTADO HÍBRIDO ---
-            # 1. Polígono de Roboflow (Forma exacta)
+            
             if "points" in pred:
                 pts = np.array([[int(p["x"]), int(p["y"])] for p in pred["points"]], np.int32)
                 pts = pts.reshape((-1, 1, 2))
                 cv2.polylines(img_bgr, [pts], True, color, 2)
 
-            # 2. Caja y Texto de MobileNet (Ajustado para ser más pequeño)
             texto = f"{label_final} {confianza_final*100:.0f}%"
             
-            # --- AJUSTES DE TAMAÑO ---
-            font_scale = 0.4  # Antes 0.6 (Más pequeño)
-            thickness = 1     # Antes 2 (Más fino)
+            font_scale = 0.4  
+            thickness = 1     
             font = cv2.FONT_HERSHEY_SIMPLEX
             
             (text_w, text_h), _ = cv2.getTextSize(texto, font, font_scale, thickness)
             
-            # Fondo ajustado al tamaño del texto
+            
             bg_h = text_h + 8
             cv2.rectangle(img_bgr, (x1, y1 - bg_h), (x1 + text_w + 4, y1), color, -1)
             
-            # Texto blanco sobre el fondo de color
+            
             cv2.putText(img_bgr, texto, (x1 + 2, y1 - 4), font, font_scale, (255, 255, 255), thickness)
 
     except Exception as e:
         print(f"❌ Error General: {e}")
         return jsonify({"error": str(e)}), 500
 
-    # 4. Retornar imagen final
     img_final_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     img_io = io.BytesIO()
     Image.fromarray(img_final_rgb).save(img_io, 'JPEG', quality=95)

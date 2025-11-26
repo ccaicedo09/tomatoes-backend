@@ -9,3 +9,4 @@ opencv-python
 scikit-learn
 pymongo
 python-dotenv
+inference-sdk
