@@ -263,24 +263,28 @@ def segmentar_todo():
 
             cv2.rectangle(img_bgr, (x1, y1), (x2, y2), color, 2)
             label = f"{clase[:3].upper()} {int(conf * 100)}%"
-            (w, h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-            cv2.rectangle(img_bgr, (x1, y1 - 20), (x1 + w, y1), color, -1)
+            (w_text, h_text), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+            cv2.rectangle(img_bgr, (x1, y1 - 20), (x1 + w_text, y1), color, -1)
             cv2.putText(img_bgr, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX,
                         0.5, (255, 255, 255), 2)
+            
+            # DB Data
+            area = int((x2 - x1) * (y2 - y1))
+            score = float(boxes.conf[i].cpu().numpy()) if boxes.conf is not None else None
 
-    # DB Data
-    area = int((x2 - x1) * (y2 - y1))
-    score = float(boxes.conf[i].cpu().numpy()) if boxes.conf is not None else None
+            detections_for_db.append({
+                "bbox": [int(x1), int(y1), int(x2), int(y2)],
+                "area": area,
+                "class": "tomato",
+                "score": score,                    # YOLO detection trust
+                "predictedLabel": clase,           # segmentation classification
+                "predictedConfidence": conf,
+                "predictedProbs": predicted_probs
+            })
 
-    detections_for_db.append({
-        "bbox": [int(x1), int(y1), int(x2), int(y2)],
-        "area": area,
-        "class": "tomato",
-        "score": score,                    # YOLO detection trust
-        "predictedLabel": clase,           # segmentation classification
-        "predictedConfidence": conf,
-        "predictedProbs": predicted_probs
-    })
+    # If there are no result.boxes or all detections were filtered,
+    # num_detections will remain 0 and detections_for_db will be empty [].
+    # We still return the image without annotations.
 
     img_final_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     img_io = io.BytesIO()
