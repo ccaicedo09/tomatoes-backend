@@ -12,4 +12,5 @@ client = MongoClient(MONGO_URI)
 
 db = client["tomatoes_ai"]
 
-samples_collection = db["samples"]
+classification_samples = db["classification_samples"]
+segmentation_samples = db["segmentation_samples"]
