@@ -35,6 +35,12 @@ def cargar_modelos(base_dir):
         print("⚠️ No hay ROBOFLOW_API_KEY en .env")
 
     try:
+        cnn_path = os.path.join(base_dir, "models", "modelo_1_cnn.h5")
+        modelos['cnn'] = tf.keras.models.load_model(cnn_path, compile=False)
+    except Exception:
+        print("⚠️ Aviso: No se encontró 'modelo_1_cnn.h5'.")
+
+    try:
         mobilenet_path = os.path.join(base_dir, "models", "modelo_2_mobilenet_final.keras")
       
         if not os.path.exists(mobilenet_path):
